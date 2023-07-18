@@ -1,0 +1,28 @@
+plugins {
+    id 'org.springframework.pulsar.spring-module'
+}
+
+description = 'Spring Cloud Stream Binder for Apache Pulsar'
+
+dependencies {
+    implementation project(':spring-pulsar-spring-boot-starter')
+    api('org.springframework.cloud:spring-cloud-stream') {
+        exclude group: 'javax.activation', module: 'javax.activation-api'
+        exclude group: 'javax.annotation', module: 'javax.annotation-api'
+    }
+    testImplementation project(':spring-pulsar-test')
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation('org.springframework.cloud:spring-cloud-stream-test-support')  {
+        exclude group: 'javax.activation', module: 'javax.activation-api'
+        exclude group: 'javax.annotation', module: 'javax.annotation-api'
+    }
+    testImplementation 'org.awaitility:awaitility'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:pulsar'
+
+}
+
+test {
+    testLogging.showStandardStreams = true
+}
+

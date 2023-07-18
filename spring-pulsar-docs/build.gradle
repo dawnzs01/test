@@ -1,0 +1,213 @@
+plugins {
+	id 'org.springframework.pulsar.spring-docs-module'
+	id 'org.asciidoctor.jvm.convert'
+}
+
+description = 'Spring Pulsar Docs'
+
+ext {
+	micrometerDocsVersion="1.0.0"
+}
+
+configurations {
+	configurationProperties
+	observationDocs
+}
+
+dependencies {
+	api project (':spring-pulsar')
+	api 'org.springframework.boot:spring-boot-starter'
+	configurationProperties(project(path: ":spring-pulsar-spring-boot-autoconfigure", configuration: "configurationPropertiesMetadata"))
+	observationDocs "io.micrometer:micrometer-docs-generator:$micrometerDocsVersion"
+}
+
+jar {
+	enabled = false
+}
+
+javadoc {
+	enabled = false
+}
+
+javadocJar {
+	enabled = false
+}
+
+sourcesJar {
+	enabled = false
+}
+
+task aggregatedJavadoc(type: Javadoc) {
+	group = 'Documentation'
+	description = 'Generates aggregated Javadoc API documentation.'
+	title = "${rootProject.description} ${version} API"
+
+	project.rootProject.gradle.projectsEvaluated {
+		Set<String> excludedProjects = ['spring-pulsar-sample-apps:sample-app1',
+										'spring-pulsar-sample-apps:sample-app2',
+										'spring-pulsar-sample-apps:sample-reactive']
+		Set<Project> publishedProjects = rootProject.subprojects.findAll { it != project}
+			.findAll { it.plugins.hasPlugin(JavaPlugin) && it.plugins.hasPlugin(MavenPublishPlugin) }
+			.findAll { !excludedProjects.contains(it.name) }
+		dependsOn publishedProjects.javadoc
+		source publishedProjects.javadoc.source
+		classpath = project.files(publishedProjects.javadoc.classpath)
+		destinationDir = project.file "${buildDir}/api"
+		options {
+			encoding = "UTF-8"
+			author = true
+			docTitle = "Spring Pulsar ${project.version} API"
+			windowTitle = "Spring Pulsar ${project.version} API"
+			overview = 'src/api/overview.html'
+			memberLevel = JavadocMemberLevel.PROTECTED
+			outputLevel = JavadocOutputLevel.QUIET
+			splitIndex = true
+			use = true
+			addBooleanOption('Xdoclint:syntax', true) // only check syntax with doclint
+			links = [
+				"https://docs.oracle.com/en/java/javase/17/docs/api/",
+				"https://docs.spring.io/spring-framework/docs/current/javadoc-api/"
+			]
+		}
+	}
+}
+
+task documentConfigurationProperties(type: org.springframework.pulsar.gradle.docs.configprops.DocumentConfigurationProperties) {
+	configurationPropertyMetadata = configurations.configurationProperties
+	outputDir = file("${buildDir}/docs/generated/")
+}
+
+def observationsInputDir = file("${rootDir}/spring-pulsar/src/main/java/org/springframework/pulsar/observation").absolutePath
+def observationsOutputDir = file("${buildDir}/docs/generated/observation/").absolutePath
+
+task generateObservabilityDocs(type: JavaExec) {
+	mainClass = 'io.micrometer.docs.DocsGeneratorCommand'
+	inputs.dir(observationsInputDir)
+	outputs.dir(observationsOutputDir)
+	classpath configurations.observationDocs
+	args observationsInputDir, /.+/, observationsOutputDir
+}
+
+tasks.withType(org.asciidoctor.gradle.jvm.AbstractAsciidoctorTask) {
+	asciidoctorj {
+		fatalWarnings = ['^((?!successfully validated).)*$']
+	}
+	forkOptions {
+		jvmArgs "--add-opens", "java.base/sun.nio.ch=ALL-UNNAMED", "--add-opens", "java.base/java.io=ALL-UNNAMED"
+	}
+	doFirst {
+		attributes "spring-pulsar-version": project.version,
+				"spring-boot-version": project(':spring-pulsar-dependencies').springBootVersion ?: 'current'
+	}
+}
+
+asciidoctor {
+	sources {
+		include "*.singleadoc"
+	}
+}
+
+task asciidoctorPdf(type: org.asciidoctor.gradle.jvm.AsciidoctorTask) {
+	sources {
+		include "*.adoc"
+	}
+}
+
+task asciidoctorMultipage(type: org.asciidoctor.gradle.jvm.AsciidoctorTask) {
+	sources {
+		include "*.adoc"
+	}
+}
+
+syncDocumentationSourceForAsciidoctor {
+	dependsOn documentConfigurationProperties, generateObservabilityDocs
+	from("${buildDir}/docs/generated") {
+		into "asciidoc"
+	}
+	from("src/main/java") {
+		into "main/java"
+	}
+}
+
+syncDocumentationSourceForAsciidoctorMultipage {
+	dependsOn documentConfigurationProperties, generateObservabilityDocs
+	from("${buildDir}/docs/generated") {
+		into "asciidoc"
+	}
+	from("src/main/java") {
+		into "main/java"
+	}
+}
+
+syncDocumentationSourceForAsciidoctorPdf {
+	dependsOn documentConfigurationProperties, generateObservabilityDocs
+	from("${buildDir}/docs/generated") {
+		into "asciidoc"
+	}
+	from("src/main/java") {
+		into "main/java"
+	}
+}
+
+task asciidocs {
+	dependsOn asciidoctor, asciidoctorMultipage, asciidoctorPdf
+}
+
+task docsZip(type: Zip) {
+	dependsOn asciidocs
+	group = 'Distribution'
+	archiveClassifier = 'docs'
+	description = "Builds docs archive containing api and reference for deployment at static.spring.io/spring-pulsar/docs."
+	duplicatesStrategy "fail"
+	from(asciidoctor.outputDir) {
+		into "reference/htmlsingle"
+	}
+	from(asciidoctorPdf.outputDir) {
+		into "reference/pdf"
+		include "index.pdf"
+		rename { "spring-pulsar-reference.pdf" }
+	}
+	from(asciidoctorMultipage.outputDir) {
+		into "reference/html"
+	}
+	from(aggregatedJavadoc) {
+		into "api"
+	}
+}
+
+artifacts {
+	archives docsZip
+}
+
+publishing {
+	publications {
+		mavenJava(MavenPublication) {
+			artifact docsZip
+		}
+	}
+}
+
+artifactoryPublish {
+	publications(publishing.publications.mavenJava)
+}
+
+tasks.register('deployDocs') {
+	dependsOn artifactoryPublish
+}
+
+signing {
+	required {
+		project.hasProperty("signing.keyId") || project.hasProperty("signingKey") &&
+			(gradle.taskGraph.hasTask("publishArtifacts") || gradle.taskGraph.hasTask("deployDocs"))
+	}
+	def signingKeyId = (String) project.findProperty("signing.keyId")
+	def signingKey = (String) project.findProperty("signingKey")
+	def signingPassword = (String) project.findProperty("signingPassword")
+	if (signingKeyId != null) {
+		useInMemoryPgpKeys(signingKeyId, signingKey, signingPassword)
+	}
+	else {
+		useInMemoryPgpKeys(signingKey, signingPassword)
+	}
+	sign publishing.publications.mavenJava
+}
