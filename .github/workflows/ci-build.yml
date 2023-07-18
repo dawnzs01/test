@@ -13,11 +13,14 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 # ----------------------------------------------------------------------------
-name: Build PR
+name: Build project
 
 on:
-  pull_request:
+  push:
     branches: [ main ]
+
+  schedule:
+    - cron: '30 7 * * 1'  # At 07:30 on Monday, every Monday.
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -28,7 +31,7 @@ env:
 jobs:
   build-linux-x86_64:
     runs-on: ubuntu-latest
-    name: linux-x86_64 build
+    name: linux-x86_64
     steps:
       - uses: actions/checkout@v2
 
@@ -36,36 +39,26 @@ jobs:
       - uses: actions/cache@v2
         with:
           path: ~/.m2/repository
-          key: pr-linux-x86_64-maven-cache-${{ hashFiles('**/pom.xml') }}
+          key: build-linux-x86_64-maven-cache-${{ hashFiles('**/pom.xml') }}
           restore-keys: |
-            pr-linux-x86_64-maven-cache-
+            build-linux-x86_64-maven-cache-
 
       # Enable caching of Docker layers
       - uses: satackey/action-docker-layer-caching@v0.0.11
         continue-on-error: true
         with:
-          key: pr-linux-x86_64-docker-cache-{hash}
+          key: build-linux-x86_64-docker-cache-{hash}
           restore-keys: |
-            pr-linux-x86_64-docker-cache-
+            build-linux-x86_64-docker-cache-
 
       - name: Build docker image
         run: docker-compose -f docker/docker-compose.centos-7.yaml -f docker/docker-compose.centos-7.18.yaml build
 
-      - name: Build project with leak detection
-        run: docker-compose -f docker/docker-compose.centos-7.yaml -f docker/docker-compose.centos-7.18.yaml run build-leak  | tee build-leak.output
+      - name: Build project without leak detection
+        run: docker-compose -f docker/docker-compose.centos-7.yaml -f docker/docker-compose.centos-7.18.yaml run build | tee build.output
 
       - name: Checking for test failures
-        run: ./.github/scripts/check_build_result.sh build-leak.output
-
-      - name: Checking for detected leak
-        run: ./.github/scripts/check_leak.sh build-leak.output
-
-      - name: Upload Test Results
-        if: always()
-        uses: actions/upload-artifact@v2
-        with:
-          name: test-results-pr-linux-x86_64
-          path: '**/target/surefire-reports/TEST-*.xml'
+        run: ./.github/scripts/check_build_result.sh build.output
 
       - uses: actions/upload-artifact@v2
         if: ${{ failure() }}
@@ -77,7 +70,7 @@ jobs:
 
   build-linux-aarch64:
     runs-on: ubuntu-latest
-    name: linux-aarch64 build
+    name: linux-aarch64
     steps:
       - uses: actions/checkout@v2
 
@@ -85,22 +78,22 @@ jobs:
       - uses: actions/cache@v2
         with:
           path: ~/.m2/repository
-          key: pr-linux-aarch64-maven-cache-${{ hashFiles('**/pom.xml') }}
+          key: build-linux-aarch64-maven-cache-${{ hashFiles('**/pom.xml') }}
           restore-keys: |
-            pr-linux-aarch64-maven-cache-
+            build-linux-aarch64-maven-cache-
 
       # Enable caching of Docker layers
       - uses: satackey/action-docker-layer-caching@v0.0.11
         continue-on-error: true
         with:
-          key: pr-linux-aarch64-docker-cache-{hash}
+          key: build-linux-aarch64-docker-cache-{hash}
           restore-keys: |
-            pr-linux-aarch64-docker-cache-
+            build-linux-aarch64-docker-cache-
 
       - name: Build docker image
         run: docker-compose -f docker/docker-compose.centos-7-cross.yaml build
 
-      - name: Build project with leak detection
+      - name: Build project without leak detection
         run: docker-compose -f docker/docker-compose.centos-7-cross.yaml run cross-compile-aarch64-build
 
       - uses: actions/upload-artifact@v2
@@ -111,9 +104,9 @@ jobs:
             **/target/surefire-reports/
             **/hs_err*.log
 
-  build-pr-windows:
+  build-windows:
     runs-on: windows-2019
-    name: windows-x86_64 build
+    name: windows-x86_64
     env:
       # Let's limit the amount of ram that is used to unpack rustup as we saw
       # failures sometimes due the fact that not enough memory could be reserved.
@@ -148,34 +141,25 @@ jobs:
           args: install ninja nasm
 
       # Cache .m2/repository
-      # Caching of maven dependencies
       - uses: actions/cache@v2
         with:
           path: ~/.m2/repository
-          key: pr-windows-x86_64-maven-cache-${{ hashFiles('**/pom.xml') }}
+          key: windows-x86_64-maven-cache-${{ hashFiles('**/pom.xml') }}
           restore-keys: |
-            pr-windows-x86_64-maven-cache-
+            windows-x86_64-maven-cache-
 
       - name: Build project
         run: ./mvnw.cmd -B -ntp --file pom.xml clean package
 
-      - name: Upload Test Results
-        if: always()
-        uses: actions/upload-artifact@v2
-        with:
-          name: test-results-pr-windows-x86_64
-          path: '**/target/surefire-reports/TEST-*.xml'
-
       - uses: actions/upload-artifact@v2
         if: ${{ failure() }}
         with:
-          name: build-pr-windows-target
+          name: build-windows-target
           path: |
             **/target/surefire-reports/
             **/hs_err*.log
 
-
-  build-pr-android:
+  build-android:
     runs-on: ubuntu-latest
     name: android
     env:
@@ -223,7 +207,7 @@ jobs:
           path: ~/.m2/repository
           key: pr-android-maven-cache-${{ hashFiles('**/pom.xml') }}
           restore-keys: |
-            pr-android-maven-cache-
+            android-maven-cache-
 
       - name: Build project
         run: ./mvnw -B -ntp --file pom.xml clean package -Dandroid
@@ -231,7 +215,7 @@ jobs:
       - uses: actions/upload-artifact@v2
         if: ${{ failure() }}
         with:
-          name: build-pr-android-target
+          name: target
           path: |
             **/target/surefire-reports/
             **/hs_err*.log
